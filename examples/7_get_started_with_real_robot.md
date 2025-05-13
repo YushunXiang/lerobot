@@ -665,6 +665,7 @@ camera.disconnect()
 **Instantiate your robot with cameras**
 
 Additionally, you can set up your robot to work with your cameras.
+Additionally, you can set up your robot to work with your cameras.
 
 Modify the following Python code with the appropriate camera names and configurations:
 ```python
@@ -828,6 +829,8 @@ It contains:
 - `dtRfoll: 6.22 (160.7hz)` which is the delta time of reading the present position on the follower arm.
 - `dtRlaptop:32.57 (30.7hz) ` which is the delta time of capturing an image from the laptop camera in the thread running asynchronously.
 - `dtRphone:33.84 (29.5hz)` which is the delta time of capturing an image from the phone camera in the thread running asynchronously.
+- `dtRlaptop:32.57 (30.7hz) ` which is the delta time of capturing an image from the laptop camera in the thread running asynchronously.
+- `dtRphone:33.84 (29.5hz)` which is the delta time of capturing an image from the phone camera in the thread running asynchronously.
 
 Troubleshooting:
 - On Linux, if the left and right arrow keys and escape key don't have any effect during data recording, make sure you've set the `$DISPLAY` environment variable. See [pynput limitations](https://pynput.readthedocs.io/en/latest/limitations.html#linux).
@@ -837,6 +840,7 @@ At the end of data recording, your dataset will be uploaded on your Hugging Face
 echo https://huggingface.co/datasets/${HF_USER}/koch_test
 ```
 
+### b. Advice for recording dataset
 ### b. Advice for recording dataset
 
 Once you're comfortable with data recording, it's time to create a larger dataset for training. A good starting task is grasping an object at different locations and placing it in a bin. We suggest recording at least 50 episodes, with 10 episodes per location. Keep the cameras fixed and maintain consistent grasping behavior throughout the recordings.
