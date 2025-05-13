@@ -141,7 +141,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
         set_seed(cfg.seed, accelerator=accelerator)
 
     # Check device is available
-    device = get_safe_torch_device(cfg.policy.device, log=True)
+    device = get_safe_torch_device(cfg.policy.device, log=True, accelerator=accelerator)
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -276,7 +276,10 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
         if cfg.env and is_eval_step:
             step_id = get_step_identifier(step, cfg.steps)
             logging.info(f"Eval policy at step {step}")
-            with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.use_amp and not accelerator else nullcontext():
+            with (
+                torch.no_grad(),
+                torch.autocast(device_type=device.type) if cfg.policy.use_amp and not accelerator else nullcontext(),
+            ):
                 eval_info = eval_policy(
                     eval_env,
                     policy if not accelerator else accelerator.unwrap_model(policy),
