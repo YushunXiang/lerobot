@@ -107,13 +107,11 @@ def update_policy(
     if lr_scheduler is not None:
         lr_scheduler.step()
 
-    if accelerator:
-        if has_method(accelerator.unwrap_model(policy, keep_fp32_wrapper=True), "update"): # FIXME(mshukor): avoid accelerator.unwrap_model ?
-            accelerator.unwrap_model(policy, keep_fp32_wrapper=True).update()
-    else:
-        if has_method(policy, "update"):
-            # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
-            policy.update()
+    if accelerator and has_method(accelerator.unwrap_model(policy, keep_fp32_wrapper=True), "update"):
+        accelerator.unwrap_model(policy, keep_fp32_wrapper=True).update()
+    elif has_method(policy, "update"):
+        # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
+        policy.update()
 
     train_metrics.loss = loss.item()
     train_metrics.grad_norm = grad_norm.item()
@@ -127,12 +125,8 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
     cfg.validate()
     logging.info(pformat(cfg.to_dict()))
 
-    if accelerator and not accelerator.is_main_process:
-        # Disable logging on non-main processes.
-        cfg.wandb.enable = False
-
     if cfg.wandb.enable and cfg.wandb.project:
-        wandb_logger = WandBLogger(cfg)
+        wandb_logger = WandBLogger(cfg, accelerator=accelerator)
     else:
         wandb_logger = None
         logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
@@ -260,7 +254,12 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
                 wandb_log_dict = train_tracker.to_dict()
                 if output_dict:
                     wandb_log_dict.update(output_dict)
-                wandb_logger.log_dict(wandb_log_dict, step)
+                
+                if accelerator:
+                    if accelerator.is_main_process:
+                        wandb_logger.log(wandb_log_dict, step=step)
+                else:
+                    wandb_logger.log_dict(wandb_log_dict, step)
             train_tracker.reset_averages()
 
         if cfg.save_checkpoint and is_saving_step and (not accelerator or accelerator.is_main_process):
@@ -304,10 +303,14 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
             if wandb_logger:
                 wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
                 wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+                # wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
 
     if eval_env:
         eval_env.close()
+    
+    if accelerator and wandb_logger:
+        accelerator.end_training()
+
     logging.info("End of training")
 
 
@@ -315,9 +318,17 @@ if __name__ == "__main__":
     init_logging()
     if is_launched_with_accelerate():
         import accelerate
+        # Add find_unused_parameters=True in DataParallelismPlugin
+        from accelerate.utils import DistributedDataParallelKwargs
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        
         # We set step_scheduler_with_optimizer False to prevent accelerate from
         # adjusting the lr_scheduler steps based on the num_processes
-        accelerator = accelerate.Accelerator(step_scheduler_with_optimizer=False)
+        accelerator = accelerate.Accelerator(
+            step_scheduler_with_optimizer=False,
+            log_with="wandb",
+            kwargs_handlers=[ddp_kwargs]
+        )
         train(accelerator=accelerator)
     else:
         train()
