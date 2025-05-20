@@ -49,7 +49,7 @@ from lerobot.common.utils.utils import (
     get_accelerate_config,
     is_launched_with_accelerate
 )
-from lerobot.common.utils.wandb_utils import WandBLogger
+from lerobot.common.utils.wandb_utils import WandBLogger, AccelerateWandBLogger
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.scripts.eval import eval_policy
@@ -121,15 +121,28 @@ def update_policy(
 
 
 @parser.wrap()
-def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
+def train(cfg: TrainPipelineConfig):
     cfg.validate()
     logging.info(pformat(cfg.to_dict()))
 
-    if cfg.wandb.enable and cfg.wandb.project:
-        wandb_logger = WandBLogger(cfg, accelerator=accelerator)
-    else:
-        wandb_logger = None
-        logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
+    import accelerate
+    # Add find_unused_parameters=True in DataParallelismPlugin
+    from accelerate.utils import DistributedDataParallelKwargs, DeepSpeedPlugin
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    deepspeed_plugin=DeepSpeedPlugin(
+        hf_ds_config=cfg.deepspeed
+    ) if cfg.deepspeed is not None else None,
+    # We set step_scheduler_with_optimizer False to prevent accelerate from
+    # adjusting the lr_scheduler steps based on the num_processes
+    wandb_logger = AccelerateWandBLogger(cfg=cfg)
+    accelerator = accelerate.Accelerator(
+        deepspeed_plugin=None,
+        mixed_precision="bf16",
+        log_with=wandb_logger,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        kwargs_handlers=[ddp_kwargs],
+        project_dir=cfg.output_dir,
+    )
 
     if cfg.seed is not None:
         set_seed(cfg.seed, accelerator=accelerator)
@@ -250,16 +263,11 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
 
         if is_log_step:
             logging.info(train_tracker)
-            if wandb_logger:
-                wandb_log_dict = train_tracker.to_dict()
-                if output_dict:
-                    wandb_log_dict.update(output_dict)
-                
-                if accelerator:
-                    if accelerator.is_main_process:
-                        wandb_logger.log(wandb_log_dict, step=step)
-                else:
-                    wandb_logger.log_dict(wandb_log_dict, step)
+            
+            wandb_log_dict = train_tracker.to_dict()
+            if output_dict:
+                wandb_log_dict.update(output_dict)
+            accelerator.log(wandb_log_dict, step=step)
             train_tracker.reset_averages()
 
         if cfg.save_checkpoint and is_saving_step and (not accelerator or accelerator.is_main_process):
@@ -267,11 +275,9 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
             checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
             save_checkpoint(checkpoint_dir, step, cfg, policy if not accelerator else accelerator.unwrap_model(policy), optimizer, lr_scheduler)
             update_last_checkpoint(checkpoint_dir)
-            if wandb_logger:
-                wandb_logger.log_policy(checkpoint_dir)
+            # accelerator.log_policy(checkpoint_dir)
 
-        if accelerator:
-            accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
         if cfg.env and is_eval_step:
             step_id = get_step_identifier(step, cfg.steps)
             logging.info(f"Eval policy at step {step}")
@@ -300,35 +306,21 @@ def train(cfg: TrainPipelineConfig, accelerator: Callable = None):
             eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
             eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
             logging.info(eval_tracker)
-            if wandb_logger:
-                wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
-                wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                # wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+
+            wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
+            wandb_logger.log(wandb_log_dict, step, mode="eval")
+            # wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+
 
     if eval_env:
         eval_env.close()
     
-    if accelerator and wandb_logger:
-        accelerator.end_training()
+    
+    accelerator.end_training()
 
     logging.info("End of training")
 
 
 if __name__ == "__main__":
     init_logging()
-    if is_launched_with_accelerate():
-        import accelerate
-        # Add find_unused_parameters=True in DataParallelismPlugin
-        from accelerate.utils import DistributedDataParallelKwargs
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-        
-        # We set step_scheduler_with_optimizer False to prevent accelerate from
-        # adjusting the lr_scheduler steps based on the num_processes
-        accelerator = accelerate.Accelerator(
-            step_scheduler_with_optimizer=False,
-            log_with="wandb",
-            kwargs_handlers=[ddp_kwargs]
-        )
-        train(accelerator=accelerator)
-    else:
-        train()
+    train()
