@@ -148,6 +148,7 @@ def load_training_state(
         tuple[int, Optimizer, LRScheduler | None]: training step, optimizer and scheduler with their
             state_dict loaded.
     """
+    print(checkpoint_dir)
     training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
     if not training_state_dir.is_dir():
         raise NotADirectoryError(training_state_dir)

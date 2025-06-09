@@ -134,11 +134,11 @@ def train(cfg: TrainPipelineConfig):
     ) if cfg.deepspeed is not None else None,
     # We set step_scheduler_with_optimizer False to prevent accelerate from
     # adjusting the lr_scheduler steps based on the num_processes
-    wandb_logger = AccelerateWandBLogger(cfg=cfg)
+    # wandb_logger = AccelerateWandBLogger(cfg=cfg)
     accelerator = accelerate.Accelerator(
         deepspeed_plugin=None,
         mixed_precision="bf16",
-        log_with=wandb_logger,
+        log_with="wandb",
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         kwargs_handlers=[ddp_kwargs],
         project_dir=cfg.output_dir,
