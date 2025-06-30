@@ -173,7 +173,6 @@ def train(cfg: TrainPipelineConfig):
     else:
         shuffle = True
         sampler = None
-
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=cfg.num_workers,
@@ -182,6 +181,8 @@ def train(cfg: TrainPipelineConfig):
         sampler=sampler,
         pin_memory=device.type != "cpu",
         drop_last=False,
+        persistent_workers=True,             # keep workers alive between epochs
+        prefetch_factor=4,                   # each worker prefetches 2 batches
     )
     dl_iter = cycle(dataloader)
 
