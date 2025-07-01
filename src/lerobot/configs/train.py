@@ -66,6 +66,8 @@ class TrainPipelineConfig(HubMixin):
     tracker: str = "none"
     wandb: WandBConfig = field(default_factory=WandBConfig)
     swanlab: SwanLabConfig = field(default_factory=SwanLabConfig)
+    persistent_workers: bool = False
+    prefetch_factor: int | None = None
 
     def __post_init__(self):
         self.checkpoint_path = None
